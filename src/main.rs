@@ -1,24 +1,18 @@
-use std::net::TcpListener;
-
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use tokio::net::TcpListener;
 #[macro_use]
 extern crate log as log_crate;
 extern crate simplelog;
 
 use crate::{log::init_logging, net::handle_client};
 
-// Struct to hold server information
-struct Server {
-    name: String,
-
-    listener: TcpListener,
-}
-
 mod log;
 mod net;
 mod packet;
 
-fn main() -> std::io::Result<()> {
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
     let login_port = 8226;
     let persona_port = 8228;
     let lobby_port = 7003;
@@ -29,33 +23,9 @@ fn main() -> std::io::Result<()> {
     println!("Press ? for help");
     println!("Press x to quit");
 
-    let mut listeners = Vec::new();
-
-    let login_server = Server {
-        name: "login".to_string(),
-        listener: TcpListener::bind(("0.0.0.0", login_port)).unwrap(),
-    };
-    debug!("Listening on port {}", login_port);
-
-    let persona_server = Server {
-        name: "persona".to_string(),
-        listener: TcpListener::bind(("0.0.0.0", persona_port)).unwrap(),
-    };
-    debug!("Listening on port {}", persona_port);
-
-    let lobby_server = Server {
-        name: "lobby".to_string(),
-        listener: TcpListener::bind(("0.0.0.0", lobby_port)).unwrap(),
-    };
-    debug!("Listening on port {}", lobby_port);
-
-    listeners.push(login_server);
-    listeners.push(persona_server);
-    listeners.push(lobby_server);
-
-    for listener in &listeners {
-        listener.listener.set_nonblocking(true).unwrap();
-    }
+    let login_listener = TcpListener::bind(("0.0.0.0", login_port)).await?;
+    let persona_listener = TcpListener::bind(("0.0.0.0", persona_port)).await?;
+    let lobby_listener = TcpListener::bind(("0.0.0.0", lobby_port)).await?;
 
     // Main loop
     loop {
@@ -101,16 +71,25 @@ fn main() -> std::io::Result<()> {
         }
 
         // Check for incoming connections
-        for listener in &listeners {
-            match listener.listener.accept() {
-                Ok((stream, _)) => {
-                    handle_client(stream, &listener.name);
-                }
-                Err(_) => {
-                    // Free up the thread
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                }
-            }
+        let login_result = login_listener.accept().await;
+        if login_result.is_ok() {
+            debug!("Login connection");
+            let (socket, _) = login_result.unwrap();
+            tokio::spawn(handle_client(socket, "login"));
+        }
+
+        let persona_result = persona_listener.accept().await;
+        if persona_result.is_ok() {
+            debug!("Persona connection");
+            let (socket, _) = persona_result.unwrap();
+            tokio::spawn(handle_client(socket, "persona"));
+        }
+
+        let lobby_result = lobby_listener.accept().await;
+        if lobby_result.is_ok() {
+            debug!("Lobby connection");
+            let (socket, _) = lobby_result.unwrap();
+            tokio::spawn(handle_client(socket, "lobby"));            
         }
     }
 
@@ -118,5 +97,3 @@ fn main() -> std::io::Result<()> {
 
     Ok(())
 }
-
-
