@@ -16,6 +16,7 @@ struct Server {
 
 mod log;
 mod net;
+mod packet;
 
 fn main() -> std::io::Result<()> {
     let login_port = 8226;
