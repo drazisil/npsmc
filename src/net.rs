@@ -3,7 +3,6 @@
 use tokio::io::AsyncReadExt;
 
 use crate::packet::header::Header;
-use tokio::macros::support::Future;
 use tokio::net::TcpStream;
 
 #[derive(Debug)]
@@ -90,11 +89,7 @@ pub(crate) async fn handle_client(mut stream: TcpStream, server_name: &str) -> R
 
             // TODO: Send a response
 
-            // Check if there are any bytes left in the stream
-            debug!("Checking for leftover bytes");
-            let leftover_bytes = stream.peek(&mut buffer).await.unwrap();
-            debug!("Leftover bytes: {}", leftover_bytes);
-            return Ok(());
+            Ok(())
         }
         _ => {
             error!("Unknown packet type: {}", packet_type);

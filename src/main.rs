@@ -1,3 +1,5 @@
+use std::borrow::BorrowMut;
+
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
@@ -11,6 +13,59 @@ mod log;
 mod net;
 mod packet;
 
+fn print_help() {
+    println!("Help:");
+    println!("? - Print this help");
+    println!("x - Quit");
+}
+
+enum Keys {
+    None,
+    Quit,
+}
+
+fn check_for_key() -> Keys {
+    // Set stdin to non-blocking
+    match enable_raw_mode() {
+        Ok(_) => {}
+        Err(_) => {
+            error!("Failed to set stdin to non-blocking");
+        }
+    }
+
+    // Poll stdin for input
+    if crossterm::event::poll(std::time::Duration::from_millis(100)).unwrap() {
+        match crossterm::event::read().unwrap() {
+            crossterm::event::Event::Key(key) => match key.code {
+                crossterm::event::KeyCode::Char('x') => {
+                    disable_raw_mode().unwrap();
+                    println!("Quitting");
+                    return Keys::Quit;
+                }
+                crossterm::event::KeyCode::Char('?') => {
+                    disable_raw_mode().unwrap();
+                    print_help();
+                }
+                _ => {
+                    disable_raw_mode().unwrap();
+                    // Swallow the key
+                    return Keys::None;
+                }
+            },
+            _ => {}
+        }
+    }
+
+    // Set stdin back to blocking
+    match disable_raw_mode() {
+        Ok(_) => {}
+        Err(_) => {
+            error!("Failed to set stdin back to blocking");
+        }
+    }
+    return Keys::None;
+}
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let login_port = 8226;
@@ -19,9 +74,10 @@ async fn main() -> std::io::Result<()> {
 
     init_logging();
 
-    println!("Starting server");
-    println!("Press ? for help");
-    println!("Press x to quit");
+    println!("Welcome to the Rusty Motors Server");
+
+    // Print help
+    print_help();
 
     let login_listener = TcpListener::bind(("0.0.0.0", login_port)).await?;
     debug!("Listening on port {}", login_port);
@@ -36,7 +92,7 @@ async fn main() -> std::io::Result<()> {
     let persona_rx = rx.clone();
     let lobby_rx = rx.clone();
 
-    // Check for incoming connections
+    // Spawn listeners
     tokio::spawn(async move {
         loop {
             if !*login_rx.borrow() {
@@ -45,15 +101,18 @@ async fn main() -> std::io::Result<()> {
             }
 
             let login_result = login_listener.accept().await;
-            if login_result.is_ok() {
+            if let Err(e) = login_result {
+                error!("Failed to accept login connection: {}", e);
+                continue;
+            }
+            if let Ok((socket, _)) = login_result {
                 debug!("Login connection");
-                let (socket, _) = login_result.unwrap();
                 tokio::spawn(handle_client(socket, "login"));
             }
         }
     });
 
-    tokio::spawn(async move {
+    let persona_handle = tokio::spawn(async move {
         loop {
             if !*persona_rx.borrow() {
                 debug!("Persona listener shutting down");
@@ -61,15 +120,18 @@ async fn main() -> std::io::Result<()> {
             }
 
             let persona_result = persona_listener.accept().await;
-            if persona_result.is_ok() {
+            if let Err(e) = persona_result {
+                error!("Failed to accept persona connection: {}", e);
+                continue;
+            }
+            if let Ok((socket, _)) = persona_result {
                 debug!("Persona connection");
-                let (socket, _) = persona_result.unwrap();
                 tokio::spawn(handle_client(socket, "persona"));
             }
         }
     });
 
-    tokio::spawn(async move {
+    let lobby_handle = tokio::spawn(async move {
         loop {
             if !*lobby_rx.borrow() {
                 debug!("Lobby listener shutting down");
@@ -77,9 +139,12 @@ async fn main() -> std::io::Result<()> {
             }
 
             let lobby_result = lobby_listener.accept().await;
-            if lobby_result.is_ok() {
+            if let Err(e) = lobby_result {
+                error!("Failed to accept lobby connection: {}", e);
+                continue;
+            }
+            if let Ok((socket, _)) = lobby_result {
                 debug!("Lobby connection");
-                let (socket, _) = lobby_result.unwrap();
                 tokio::spawn(handle_client(socket, "lobby"));
             }
         }
@@ -87,46 +152,13 @@ async fn main() -> std::io::Result<()> {
 
     // Main loop
     loop {
-        // Set stdin to non-blocking
-        match enable_raw_mode() {
-            Ok(_) => {}
-            Err(_) => {
-                error!("Failed to set stdin to non-blocking");
+        // Check for input
+        match check_for_key() {
+            Keys::Quit => {
+                tx.send(false).unwrap();
                 break;
             }
-        }
-
-        // Poll stdin for input
-        if crossterm::event::poll(std::time::Duration::from_millis(100)).unwrap() {
-            match crossterm::event::read().unwrap() {
-                crossterm::event::Event::Key(key) => match key.code {
-                    crossterm::event::KeyCode::Char('x') => {
-                        disable_raw_mode().unwrap();
-                        println!("Quitting");
-                        tx.send_replace(false);
-                        break;
-                    }
-                    crossterm::event::KeyCode::Char('?') => {
-                        disable_raw_mode().unwrap();
-                        println!("You can press x to quit");
-                        break;
-                    }
-                    _ => {
-                        // Cancel out the key press
-                        continue;
-                    }
-                },
-                _ => {}
-            }
-        }
-
-        // Set stdin back to blocking
-        match disable_raw_mode() {
-            Ok(_) => {}
-            Err(_) => {
-                error!("Failed to set stdin back to blocking");
-                break;
-            }
+            _ => {}
         }
 
         // Sleep for a bit
