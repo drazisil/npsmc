@@ -1,8 +1,10 @@
 // Desc: Network code
 
-use tokio::io::AsyncReadExt;
+use crossterm::terminal::disable_raw_mode;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::packet::header::Header;
+use crate::parser::user_login::handle_user_login;
 use tokio::net::TcpStream;
 
 #[derive(Debug)]
@@ -23,6 +25,7 @@ impl PacketId {
 pub(crate) async fn handle_client(mut stream: TcpStream, server_name: &str) -> Result<(), ()> {
     let mut buffer = [0; 4];
     let header: Header;
+    disable_raw_mode().unwrap();
 
     // Log the connection
     info!(
@@ -83,13 +86,20 @@ pub(crate) async fn handle_client(mut stream: TcpStream, server_name: &str) -> R
     // If known packet type, load into appropriate struct
     match packet_type {
         "LoginRequest" => {
-            let parsed_packet = crate::packet::login_request::LoginRequest::from_bytes(&packet);
+            let response_packets: Vec<Vec<u8>> = handle_user_login(packet.as_slice()).await?;
             debug!("Loading packet type: {}", packet_type);
-            info!("Parsed packet: {:?}", parsed_packet);
 
-            // TODO: Send a response
-
-            Ok(())
+            // Send response packets
+            for response_packet in response_packets {
+                debug!("Sending packet: {}", hex::encode(&response_packet));
+                match stream.write_all(&response_packet).await {
+                    Ok(_) => {}
+                    Err(_) => {
+                        error!("Failed to send packet");
+                        return Err(());
+                    }
+                }
+            }
         }
         _ => {
             error!("Unknown packet type: {}", packet_type);
@@ -97,4 +107,5 @@ pub(crate) async fn handle_client(mut stream: TcpStream, server_name: &str) -> R
             return Err(());
         }
     }
+    Ok(())
 }

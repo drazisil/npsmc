@@ -1,5 +1,3 @@
-use std::borrow::BorrowMut;
-
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
@@ -12,6 +10,7 @@ use crate::{log::init_logging, net::handle_client};
 mod log;
 mod net;
 mod packet;
+mod parser;
 
 fn print_help() {
     println!("Help:");
